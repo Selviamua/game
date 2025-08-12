@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WWE Pixel Wrestling</title>
+  <style>
+    body { 
+      margin: 0; 
+      background: linear-gradient(135deg, #1a1a2e, #16213e);
+      font-family: 'Arial', sans-serif;
+      overflow: hidden;
+    }
+    canvas { 
+      display: block; 
+      margin: 0 auto; 
+      background: linear-gradient(to bottom, #2c3e50, #34495e);
+      border: 3px solid #e74c3c;
+      box-shadow: 0 0 20px rgba(231, 76, 60, 0.5);
+    }
+    .controls {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0,0,0,0.7);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+<canvas id="game" width="1000" height="600"></canvas>
+<div class="controls">
+  <strong>玩家1控制:</strong><br>
+  WASD - 移动<br>
+  F - 拳击<br>
+  G - 踢腿<br>
+  H - 特殊技能<br>
+  Space - 格挡<br>
+  <br>
+  <strong>玩家2控制:</strong><br>
+  方向键 - 移动<br>
+  L - 拳击<br>
+  K - 踢腿<br>
+  J - 特殊技能<br>
+  Enter - 格挡
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// 游戏状态
+const gameState = {
+  players: [],
+  particles: [],
+  effects: [],
+  round: 1,
+  time: 1800, // 30秒 (30 * 60 = 1800帧，60fps)
+  winner: null
+};
+
+// 玩家类
+class Player {
+  constructor(x, y, color, controls, facing) {
+    this.x = x;
+    this.y = y;
+    this.vx = 0;
+    this.vy = 0;
+    this.width = 40;
+    this.height = 80;
+    this.color = color;
+    this.controls = controls;
+    this.facing = facing;
+    
+    // 战斗属性
+    this.hp = 100;
+    this.maxHp = 100;
+    this.energy = 100;
+    this.maxEnergy = 100;
+    this.combo = 0;
+    this.maxCombo = 0;
+    
+    // 状态
+    this.state = 'idle'; // idle, walking, punching, kicking, special, blocking, hit, knocked
+    this.stateTimer = 0;
+    this.invincible = false;
+    this.invincibleTimer = 0;
+    
+    // 攻击属性
+    this.attackBox = { x: 0, y: 0, width: 0, height: 0 };
+    this.attackDamage = 0;
+    this.attackType = '';
+    
+    // 动画
+    this.animationFrame = 0;
+    this.animationSpeed = 0.2;
+  }
+  
+  update() {
+    // 更新位置
+    this.x += this.vx;
+    this.y += this.vy;
+    
+    // 边界限制
+    this.x = Math.max(50, Math.min(canvas.width - 50, this.x));
+    this.y = Math.max(50, Math.min(canvas.height - 50, this.y));
+    
+    // 重力
+    if (this.y < canvas.height - 100) {
+      this.vy += 0.5;
+    } else {
+      this.vy = 0;
+      this.y = canvas.height - 100;
+    }
+    
+    // 状态更新
+    if (this.stateTimer > 0) {
+      this.stateTimer--;
+      if (this.stateTimer === 0) {
+        this.setState('idle');
+      }
+    }
+    
+    // 无敌时间
+    if (this.invincibleTimer > 0) {
+      this.invincibleTimer--;
+      if (this.invincibleTimer === 0) {
+        this.invincible = false;
+      }
+    }
+    
+    // 能量恢复
+    if (this.energy < this.maxEnergy) {
+      this.energy += 0.5;
+    }
+    
+    // 连击衰减
+    if (this.combo > 0) {
+      this.combo -= 0.1;
+      if (this.combo <= 0) {
+        this.combo = 0;
+      }
+    }
+    
+    // 动画更新
+    this.animationFrame += this.animationSpeed;
+  }
+  
+  setState(newState, duration = 0) {
+    this.state = newState;
+    this.stateTimer = duration;
+    this.animationFrame = 0;
+  }
+  
+  takeDamage(damage, knockback = 0) {
+    if (this.invincible || this.state === 'blocking') return false;
+    
+    this.hp -= damage;
+    this.setState('hit', 20);
+    this.invincible = true;
+    this.invincibleTimer = 30;
+    
+    // 击退效果
+    if (knockback > 0) {
+      this.vx = knockback * this.facing * -1;
+      this.vy = -5;
+    }
+    
+    // 连击重置
+    this.combo = 0;
+    
+    // 击倒判定
+    if (this.hp <= 0) {
+      this.setState('knocked', 120);
+      this.hp = 0;
+    }
+    
+    return true;
+  }
+  
+  attack(type) {
+    if (this.state !== 'idle' && this.state !== 'walking') return;
+    
+    switch(type) {
+      case 'punch':
+        this.setState('punching', 15);
+        this.attackDamage = 15 + this.combo * 2;
+        this.attackType = 'punch';
+        this.combo++;
+        break;
+      case 'kick':
+        this.setState('kicking', 25);
+        this.attackDamage = 25 + this.combo * 3;
+        this.attackType = 'kick';
+        this.combo++;
+        break;
+      case 'special':
+        if (this.energy >= 30) {
+          this.setState('special', 40);
+          this.attackDamage = 40 + this.combo * 5;
+          this.attackType = 'special';
+          this.energy -= 30;
+          this.combo += 2;
+        }
+        break;
+    }
+    
+    this.maxCombo = Math.max(this.maxCombo, this.combo);
+  }
+  
+  block() {
+    if (this.state === 'idle' || this.state === 'walking') {
+      this.setState('blocking', 0);
+    }
+  }
+  
+  getAttackBox() {
+    const range = this.attackType === 'kick' ? 80 : 60;
+    const height = this.attackType === 'kick' ? 40 : 30;
+    
+    if (this.facing === 1) {
+      return {
+        x: this.x + this.width,
+        y: this.y + this.height / 2 - height / 2,
+        width: range,
+        height: height
+      };
+    } else {
+      return {
+        x: this.x - range,
+        y: this.y + this.height / 2 - height / 2,
+        width: range,
+        height: height
+      };
+    }
+  }
+  
+  draw() {
+    ctx.save();
+    
+    // 闪烁效果（无敌时）
+    if (this.invincible && Math.floor(this.invincibleTimer / 3) % 2 === 0) {
+      ctx.globalAlpha = 0.5;
+    }
+    
+    // 翻转
+    if (this.facing === -1) {
+      ctx.scale(-1, 1);
+      ctx.translate(-this.x * 2 - this.width, 0);
+    }
+    
+    // 绘制角色
+    ctx.fillStyle = this.color;
+    ctx.fillRect(this.x, this.y, this.width, this.height);
+    
+    // 绘制细节
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(this.x + 5, this.y + 10, 30, 20); // 头部
+    ctx.fillStyle = '#000';
+    ctx.fillRect(this.x + 15, this.y + 15, 5, 5); // 眼睛
+    ctx.fillRect(this.x + 25, this.y + 15, 5, 5);
+    
+    // 攻击动画
+    if (this.state === 'punching' || this.state === 'kicking' || this.state === 'special') {
+      ctx.fillStyle = '#ff4444';
+      const attackBox = this.getAttackBox();
+      ctx.fillRect(attackBox.x, attackBox.y, attackBox.width, attackBox.height);
+    }
+    
+    // 格挡效果
+    if (this.state === 'blocking') {
+      ctx.fillStyle = '#4444ff';
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(this.x - 10, this.y, this.width + 20, this.height);
+    }
+    
+    ctx.restore();
+    
+    // 绘制血条和能量条
+    this.drawBars();
+  }
+  
+  drawBars() {
+    const barWidth = 100;
+    const barHeight = 8;
+    const x = this.x - 30;
+    const y = this.y - 20;
+    
+    // 血条背景
+    ctx.fillStyle = '#333';
+    ctx.fillRect(x, y, barWidth, barHeight);
+    
+    // 血条
+    const hpPercent = this.hp / this.maxHp;
+    ctx.fillStyle = hpPercent > 0.5 ? '#2ecc71' : hpPercent > 0.25 ? '#f39c12' : '#e74c3c';
+    ctx.fillRect(x, y, barWidth * hpPercent, barHeight);
+    
+    // 能量条
+    ctx.fillStyle = '#333';
+    ctx.fillRect(x, y + 12, barWidth, barHeight);
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(x, y + 12, barWidth * (this.energy / this.maxEnergy), barHeight);
+    
+    // 连击数
+    if (this.combo > 1) {
+      ctx.fillStyle = '#e74c3c';
+      ctx.font = '16px Arial';
+      ctx.fillText(`${this.combo}x`, this.x, this.y - 30);
+    }
+  }
+}
+
+// 粒子效果类
+class Particle {
+  constructor(x, y, vx, vy, color, life) {
+    this.x = x;
+    this.y = y;
+    this.vx = vx;
+    this.vy = vy;
+    this.color = color;
+    this.life = life;
+    this.maxLife = life;
+  }
+  
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vy += 0.2; // 重力
+    this.life--;
+  }
+  
+  draw() {
+    const alpha = this.life / this.maxLife;
+  ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = this.color;
+    ctx.fillRect(this.x, this.y, 3, 3);
+  ctx.restore();
+  }
+}
+
+// 特效类
+class Effect {
+  constructor(x, y, type) {
+    this.x = x;
+    this.y = y;
+    this.type = type;
+    this.timer = 30;
+    this.particles = [];
+    
+    // 创建粒子
+    for (let i = 0; i < 10; i++) {
+      this.particles.push(new Particle(
+        x, y,
+        (Math.random() - 0.5) * 10,
+        (Math.random() - 0.5) * 10,
+        type === 'hit' ? '#ff4444' : '#ffff44',
+        30
+      ));
+    }
+  }
+  
+  update() {
+    this.timer--;
+    this.particles.forEach(p => p.update());
+    this.particles = this.particles.filter(p => p.life > 0);
+  }
+  
+  draw() {
+    // 绘制特效文字
+    ctx.save();
+    ctx.fillStyle = this.type === 'hit' ? '#ff4444' : '#ffff44';
+    ctx.font = '24px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(this.type.toUpperCase(), this.x, this.y - this.timer);
+    ctx.restore();
+    
+    // 绘制粒子
+    this.particles.forEach(p => p.draw());
+  }
+}
+
+// 初始化玩家
+const player1 = new Player(200, 400, '#e74c3c', {
+  left: 'a', right: 'd', up: 'w', down: 's',
+  punch: 'f', kick: 'g', special: 'h', block: ' '
+}, 1);
+
+const player2 = new Player(800, 400, '#3498db', {
+  left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown',
+  punch: 'l', kick: 'k', special: 'j', block: 'Enter'
+}, -1);
+
+gameState.players = [player1, player2];
+
+// 输入处理
+const keys = {};
+document.addEventListener("keydown", e => {
+  keys[e.key] = true;
+  e.preventDefault();
+});
+document.addEventListener("keyup", e => {
+  keys[e.key] = false;
+});
+
+// 碰撞检测
+function checkCollision(rect1, rect2) {
+  return rect1.x < rect2.x + rect2.width &&
+         rect1.x + rect1.width > rect2.x &&
+         rect1.y < rect2.y + rect2.height &&
+         rect1.y + rect1.height > rect2.y;
+}
+
+// 游戏更新
+function update() {
+  if (gameState.winner) return;
+  
+  // 更新游戏时间
+  gameState.time--;
+  if (gameState.time <= 0) {
+    gameState.winner = player1.hp > player2.hp ? "Player 1 Wins!" : "Player 2 Wins!";
+    return;
+  }
+  
+  // 更新玩家
+  gameState.players.forEach(player => {
+    // 移动控制
+    const controls = player.controls;
+    
+    if (keys[controls.left]) {
+      player.vx = -3;
+      player.facing = -1;
+      if (player.state === 'idle') player.setState('walking');
+    } else if (keys[controls.right]) {
+      player.vx = 3;
+      player.facing = 1;
+      if (player.state === 'idle') player.setState('walking');
+    } else {
+      player.vx = 0;
+      if (player.state === 'walking') player.setState('idle');
+    }
+    
+    // 跳跃
+    if (keys[controls.up] && player.y >= canvas.height - 100) {
+      player.vy = -12;
+    }
+    
+    // 攻击控制
+    if (keys[controls.punch]) {
+      player.attack('punch');
+    }
+    if (keys[controls.kick]) {
+      player.attack('kick');
+    }
+    if (keys[controls.special]) {
+      player.attack('special');
+    }
+    if (keys[controls.block]) {
+      player.block();
+    }
+    
+    player.update();
+  });
+  
+  // 攻击检测
+  gameState.players.forEach(attacker => {
+    if (attacker.state === 'punching' || attacker.state === 'kicking' || attacker.state === 'special') {
+      const attackBox = attacker.getAttackBox();
+      
+      gameState.players.forEach(defender => {
+        if (defender !== attacker) {
+          const defenderBox = {
+            x: defender.x,
+            y: defender.y,
+            width: defender.width,
+            height: defender.height
+          };
+          
+          if (checkCollision(attackBox, defenderBox)) {
+            if (defender.takeDamage(attacker.attackDamage, attacker.attackType === 'special' ? 8 : 3)) {
+              // 创建打击特效
+              gameState.effects.push(new Effect(
+                defender.x + defender.width / 2,
+                defender.y + defender.height / 2,
+                'hit'
+              ));
+              
+              // 创建粒子效果
+              for (let i = 0; i < 5; i++) {
+                gameState.particles.push(new Particle(
+                  defender.x + defender.width / 2,
+                  defender.y + defender.height / 2,
+                  (Math.random() - 0.5) * 8,
+                  (Math.random() - 0.5) * 8,
+                  '#ff4444',
+                  20
+                ));
+              }
+            }
+          }
+        }
+      });
+    }
+  });
+  
+  // 更新特效
+  gameState.effects.forEach(effect => effect.update());
+  gameState.effects = gameState.effects.filter(effect => effect.timer > 0);
+  
+  // 更新粒子
+  gameState.particles.forEach(particle => particle.update());
+  gameState.particles = gameState.particles.filter(particle => particle.life > 0);
+  
+  // 胜负判定
+  if (player1.hp <= 0 && player1.state !== 'knocked') {
+    gameState.winner = "Player 2 Wins!";
+  } else if (player2.hp <= 0 && player2.state !== 'knocked') {
+    gameState.winner = "Player 1 Wins!";
+  }
+}
+
+// 绘制游戏
+function draw() {
+  // 清空画布
+  ctx.fillStyle = '#2c3e50';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // 绘制擂台
+  ctx.fillStyle = '#34495e';
+  ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+  
+  // 绘制网格
+  ctx.strokeStyle = '#2c3e50';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < canvas.width; i += 50) {
+    ctx.beginPath();
+    ctx.moveTo(i, 0);
+    ctx.lineTo(i, canvas.height);
+    ctx.stroke();
+  }
+  
+  // 绘制玩家
+  gameState.players.forEach(player => player.draw());
+  
+  // 绘制特效
+  gameState.effects.forEach(effect => effect.draw());
+  
+  // 绘制粒子
+  gameState.particles.forEach(particle => particle.draw());
+  
+  // 绘制UI
+  drawUI();
+}
+
+// 绘制UI
+function drawUI() {
+  ctx.fillStyle = 'white';
+  ctx.font = '20px Arial';
+  ctx.textAlign = 'center';
+  
+  // 时间
+  const minutes = Math.floor(gameState.time / 60);
+  const seconds = gameState.time % 60;
+  ctx.fillText(`${minutes}:${seconds.toString().padStart(2, '0')}`, canvas.width / 2, 30);
+  
+  // 回合
+  ctx.fillText(`Round ${gameState.round}`, canvas.width / 2, 60);
+  
+  // 胜负显示
+  if (gameState.winner) {
+    ctx.fillStyle = '#e74c3c';
+    ctx.font = '48px Arial';
+    ctx.fillText(gameState.winner, canvas.width / 2, canvas.height / 2);
+    
+    ctx.fillStyle = 'white';
+    ctx.font = '24px Arial';
+    ctx.fillText('Press R to restart', canvas.width / 2, canvas.height / 2 + 50);
+  }
+}
+
+// 游戏循环
+function gameLoop() {
+    update();
+    draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// 重启游戏
+document.addEventListener("keydown", e => {
+  if (e.key === 'r' && gameState.winner) {
+    location.reload();
+  }
+});
+
+// 开始游戏
+gameLoop();
+</script>
+</body>
+</html>

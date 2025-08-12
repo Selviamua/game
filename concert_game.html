@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎮 捉奸现场 - 小游戏 Demo (稳定版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700&display=swap');
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background-color: #111827;
+            color: #e5e7eb;
+        }
+        .game-container {
+            display: grid;
+            grid-template-columns: 1fr; /* Single column on mobile */
+            md:grid-template-columns: 1fr 1fr; /* Two columns on medium screens and up */
+            gap: 1rem;
+            width: 100%;
+            max-width: 1200px;
+            margin: auto;
+            aspect-ratio: 16 / 8;
+        }
+        .panel {
+            background-color: #1f2937;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            position: relative;
+            border: 2px solid #374151;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #camera-view video, #camera-view .video-fallback {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .video-fallback {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: #000;
+            text-align: center;
+        }
+        #stadium-view {
+            background: #0a0a14 url('data:image/svg+xml,%3Csvg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="none" fill-rule="evenodd"%3E%3Cg fill="%231f2937" fill-opacity="0.4"%3E%3Cpath d="M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E');
+        }
+        #big-screen {
+            width: 80%;
+            height: 70%;
+            background-color: #000;
+            border: 6px solid #4a5568;
+            border-radius: 0.5rem;
+            transition: all 0.5s ease-in-out;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+        #big-screen.is-live {
+            box-shadow: 0 0 30px 5px rgba(255, 255, 100, 0.7);
+        }
+        .btn-action {
+            transition: all 0.2s ease-in-out;
+            padding: 0.75rem 2rem;
+            font-size: 1.125rem;
+            font-weight: bold;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+        .btn-action:hover {
+            transform: translateY(-2px);
+        }
+        .btn-action:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="text-center mb-6">
+        <h1 class="text-3xl md:text-4xl font-bold tracking-wide">💥 捉奸现场：全场直播 💥</h1>
+        <p class="text-gray-400 mt-2">你能发现隐藏在人群中的秘密吗？</p>
+    </div>
+
+    <div id="game-ui" class="max-w-5xl mx-auto">
+        <div class="game-container mb-4">
+            <div id="camera-view" class="panel">
+                <div class="absolute top-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-sm font-mono z-10">
+                    <span class="text-red-500">●</span> REC
+                </div>
+                <video id="camera-feed" autoplay muted loop playsinline class="hidden"></video>
+                <div id="video-fallback" class="video-fallback hidden">
+                    <p class="text-red-500 font-bold">视频加载失败</p>
+                    <p class="text-sm text-gray-400">请检查资源链接或网络连接</p>
+                </div>
+            </div>
+            <div id="stadium-view" class="panel">
+                <div id="big-screen"></div>
+            </div>
+        </div>
+        
+        <div class="text-center mb-6 h-16 flex flex-col justify-center items-center">
+            <p id="message-area" class="text-xl font-bold h-8"></p>
+            <p class="text-lg font-bold">当前积分: <span id="score">0</span></p>
+        </div>
+
+        <div id="controls" class="flex justify-center items-center gap-6">
+            <button id="bust-button" class="btn-action bg-red-600 hover:bg-red-500 text-white">识破</button>
+            <button id="pass-button" class="btn-action bg-green-600 hover:bg-green-500 text-white">放过</button>
+        </div>
+        
+        <div id="reset-container" class="text-center mt-4 hidden">
+             <button id="reset-button" class="btn-action bg-blue-600 hover:bg-blue-500 text-white">寻找下一个目标</button>
+        </div>
+    </div>
+
+    <script>
+        // --- DOM ELEMENTS ---
+        const scoreEl = document.getElementById('score');
+        const messageEl = document.getElementById('message-area');
+        const bustBtn = document.getElementById('bust-button');
+        const passBtn = document.getElementById('pass-button');
+        const controlsEl = document.getElementById('controls');
+        const resetContainerEl = document.getElementById('reset-container');
+        const resetBtn = document.getElementById('reset-button');
+        const bigScreenEl = document.getElementById('big-screen');
+        const cameraFeedEl = document.getElementById('camera-feed');
+        const videoFallbackEl = document.getElementById('video-fallback');
+
+        // --- GAME CONFIGURATION ---
+        // FIX: Swapped to a new set of reliable, public, CORS-friendly URLs from Pexels.
+        const TARGETS = [
+            {
+                videoUrl: 'myvideo.mp4', // 指向 media 文件夹里的视频
+                caughtImageUrl: 'image1.jpg', // 指向 media 文件夹里的图片
+                isGuilty: true,
+                successMessage: '抓个正着！全场轰动！',
+                failMessage: '判断失误！他们只是在秀恩爱。'
+            },
+            {
+                videoUrl: "myvedio2.mp4",
+                caughtImageUrl: 'image2.jpg',
+                isGuilty: false,
+                successMessage: '放过一马！他们只是普通观众。',
+                failMessage: '糟糕，你错过了大新闻！'
+            }
+        ];
+
+        // --- GAME STATE ---
+        let currentScore = 0;
+        let currentTargetIndex = 0;
+
+        function setupRound(index) {
+            const target = TARGETS[index];
+            
+            // Setup video
+            cameraFeedEl.src = target.videoUrl;
+            cameraFeedEl.classList.add('hidden');
+            videoFallbackEl.classList.add('hidden');
+
+            // Reset big screen
+            bigScreenEl.style.backgroundImage = 'none';
+            bigScreenEl.classList.remove('is-live');
+
+            // Reset buttons and messages
+            messageEl.textContent = '';
+            bustBtn.disabled = false;
+            passBtn.disabled = false;
+            controlsEl.classList.remove('hidden');
+            resetContainerEl.classList.add('hidden');
+        }
+
+        function handleChoice(isBust) {
+            bustBtn.disabled = true;
+            passBtn.disabled = true;
+
+            const target = TARGETS[currentTargetIndex];
+            const correctChoice = (isBust === target.isGuilty);
+
+            if (correctChoice) {
+                currentScore += 100;
+                messageEl.textContent = target.successMessage;
+                messageEl.style.color = '#4ade80'; // Green
+                if (target.isGuilty) {
+                    bigScreenEl.style.backgroundImage = `url('${target.caughtImageUrl}')`;
+                    bigScreenEl.classList.add('is-live');
+                }
+            } else {
+                currentScore -= 50;
+                messageEl.textContent = target.failMessage;
+                messageEl.style.color = '#f87171'; // Red
+            }
+
+            scoreEl.textContent = currentScore;
+            controlsEl.classList.add('hidden');
+            resetContainerEl.classList.remove('hidden');
+        }
+
+        function nextRound() {
+            currentTargetIndex = (currentTargetIndex + 1) % TARGETS.length;
+            setupRound(currentTargetIndex);
+        }
+
+        // --- EVENT LISTENERS ---
+        bustBtn.addEventListener('click', () => handleChoice(true));
+        passBtn.addEventListener('click', () => handleChoice(false));
+        resetBtn.addEventListener('click', nextRound);
+
+        cameraFeedEl.addEventListener('canplay', () => {
+            cameraFeedEl.classList.remove('hidden');
+            videoFallbackEl.classList.add('hidden');
+            console.log("视频已准备好，可以播放。");
+        });
+
+        cameraFeedEl.addEventListener('error', () => {
+            cameraFeedEl.classList.add('hidden');
+            videoFallbackEl.classList.remove('hidden');
+            console.error("视频加载失败:", cameraFeedEl.src);
+        });
+
+        // --- INITIAL GAME START ---
+        setupRound(currentTargetIndex);
+
+    </script>
+</body>
+</html>

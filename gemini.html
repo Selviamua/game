@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WWE 像素拳击小游戏</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Press Start 2P', cursive;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .game-container {
+            position: relative;
+            width: 1024px;
+            height: 576px;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url('https://placehold.co/1024x576/808080/000000?text=FIGHT+ARENA');
+            background-size: cover;
+            border-radius: 8px;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 让鼠标事件可以穿透到canvas */
+        }
+        .health-bar-container {
+            position: absolute;
+            top: 20px;
+            width: calc(50% - 40px);
+            height: 30px;
+            background-color: rgba(0, 0, 0, 0.5);
+            border: 4px solid white;
+            border-radius: 4px;
+        }
+        #player1-health-container {
+            left: 20px;
+        }
+        #player2-health-container {
+            right: 20px;
+        }
+        .health-bar {
+            height: 100%;
+            background-color: #ef4444; /* red-500 */
+            transition: width 0.2s linear;
+        }
+        #timer {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100px;
+            height: 50px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 24px;
+            border: 4px solid white;
+            border-radius: 4px;
+        }
+        #game-status {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 48px;
+            text-align: center;
+            text-shadow: 4px 4px 0 #000;
+            display: none; /* 初始隐藏 */
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container shadow-2xl">
+        <canvas id="gameCanvas"></canvas>
+        <div id="ui-overlay">
+            <!-- 玩家1血条 -->
+            <div id="player1-health-container" class="health-bar-container">
+                <div id="player1-health" class="health-bar" style="width: 100%;"></div>
+            </div>
+            <!-- 计时器 -->
+            <div id="timer">60</div>
+            <!-- 玩家2血条 -->
+            <div id="player2-health-container" class="health-bar-container">
+                <div id="player2-health" class="health-bar" style="width: 100%;"></div>
+            </div>
+            <!-- 游戏状态显示 -->
+            <div id="game-status"></div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const c = canvas.getContext('2d');
+
+        canvas.width = 1024;
+        canvas.height = 576;
+
+        const gravity = 0.7;
+
+        // 玩家类
+        class Player {
+            constructor({ position, velocity, color = 'red', offset }) {
+                this.position = position;
+                this.velocity = velocity;
+                this.width = 50;
+                this.height = 150;
+                this.lastKey = '';
+                this.attackBox = {
+                    position: {
+                        x: this.position.x,
+                        y: this.position.y
+                    },
+                    offset,
+                    width: 100,
+                    height: 50
+                };
+                this.color = color;
+                this.isAttacking = false;
+                this.health = 100;
+            }
+
+            draw() {
+                c.fillStyle = this.color;
+                c.fillRect(this.position.x, this.position.y, this.width, this.height);
+
+                // 攻击框 (仅在攻击时绘制用于调试)
+                // if (this.isAttacking) {
+                //     c.fillStyle = 'green';
+                //     c.fillRect(this.attackBox.position.x, this.attackBox.position.y, this.attackBox.width, this.attackBox.height);
+                // }
+            }
+
+            update() {
+                this.draw();
+                this.attackBox.position.x = this.position.x + this.attackBox.offset.x;
+                this.attackBox.position.y = this.position.y;
+
+                this.position.x += this.velocity.x;
+                this.position.y += this.velocity.y;
+
+                // 应用重力
+                if (this.position.y + this.height + this.velocity.y >= canvas.height) {
+                    this.velocity.y = 0;
+                } else {
+                    this.velocity.y += gravity;
+                }
+            }
+
+            attack() {
+                this.isAttacking = true;
+                setTimeout(() => {
+                    this.isAttacking = false;
+                }, 100); // 攻击持续时间
+            }
+        }
+
+        // 创建玩家实例
+        const player1 = new Player({
+            position: { x: 200, y: 100 },
+            velocity: { x: 0, y: 0 },
+            color: '#f87171', // red-400
+            offset: { x: 0, y: 0 }
+        });
+
+        const player2 = new Player({
+            position: { x: 774, y: 100 },
+            velocity: { x: 0, y: 0 },
+            color: '#60a5fa', // blue-400
+            offset: { x: -50, y: 0 }
+        });
+
+        const keys = {
+            a: { pressed: false },
+            d: { pressed: false },
+            w: { pressed: false },
+            ArrowRight: { pressed: false },
+            ArrowLeft: { pressed: false },
+            ArrowUp: { pressed: false }
+        };
+
+        function rectangularCollision({ rectangle1, rectangle2 }) {
+            return (
+                rectangle1.attackBox.position.x + rectangle1.attackBox.width >= rectangle2.position.x &&
+                rectangle1.attackBox.position.x <= rectangle2.position.x + rectangle2.width &&
+                rectangle1.attackBox.position.y + rectangle1.attackBox.height >= rectangle2.position.y &&
+                rectangle1.attackBox.position.y <= rectangle2.position.y + rectangle2.height
+            );
+        }
+        
+        const gameStatusEl = document.getElementById('game-status');
+        const timerEl = document.getElementById('timer');
+        const player1HealthEl = document.getElementById('player1-health');
+        const player2HealthEl = document.getElementById('player2-health');
+
+        function determineWinner({ player1, player2, timerId }) {
+             clearTimeout(timerId);
+             gameStatusEl.style.display = 'flex';
+             if (player1.health === player2.health) {
+                 gameStatusEl.innerHTML = 'Tie';
+             } else if (player1.health > player2.health) {
+                 gameStatusEl.innerHTML = 'Player 1 Wins';
+             } else {
+                 gameStatusEl.innerHTML = 'Player 2 Wins';
+             }
+        }
+
+        let timer = 60;
+        let timerId;
+        function decreaseTimer() {
+            if (timer > 0) {
+                timerId = setTimeout(decreaseTimer, 1000);
+                timer--;
+                timerEl.innerHTML = timer;
+            }
+
+            if (timer === 0) {
+                determineWinner({player1, player2, timerId});
+            }
+        }
+
+        decreaseTimer();
+
+        // 游戏主循环
+        function animate() {
+            const animationId = window.requestAnimationFrame(animate);
+            c.clearRect(0, 0, canvas.width, canvas.height); // 清除画布
+
+            player1.update();
+            player2.update();
+
+            // 玩家移动
+            player1.velocity.x = 0;
+            if (keys.a.pressed && player1.lastKey === 'a') {
+                player1.velocity.x = -5;
+            } else if (keys.d.pressed && player1.lastKey === 'd') {
+                player1.velocity.x = 5;
+            }
+
+            player2.velocity.x = 0;
+            if (keys.ArrowLeft.pressed && player2.lastKey === 'ArrowLeft') {
+                player2.velocity.x = -5;
+            } else if (keys.ArrowRight.pressed && player2.lastKey === 'ArrowRight') {
+                player2.velocity.x = 5;
+            }
+            
+            // 碰撞检测
+            if (
+                rectangularCollision({ rectangle1: player1, rectangle2: player2 }) &&
+                player1.isAttacking
+            ) {
+                player1.isAttacking = false;
+                player2.health -= 10;
+                player2HealthEl.style.width = player2.health + '%';
+                console.log('player 1 hit');
+            }
+
+            if (
+                rectangularCollision({ rectangle1: player2, rectangle2: player1 }) &&
+                player2.isAttacking
+            ) {
+                player2.isAttacking = false;
+                player1.health -= 10;
+                player1HealthEl.style.width = player1.health + '%';
+                console.log('player 2 hit');
+            }
+
+            // 游戏结束判断
+            if (player1.health <= 0 || player2.health <= 0) {
+                determineWinner({player1, player2, timerId});
+                window.cancelAnimationFrame(animationId);
+            }
+        }
+
+        animate();
+
+        // 键盘事件监听
+        window.addEventListener('keydown', (event) => {
+            switch (event.key) {
+                // 玩家1控制
+                case 'd':
+                    keys.d.pressed = true;
+                    player1.lastKey = 'd';
+                    break;
+                case 'a':
+                    keys.a.pressed = true;
+                    player1.lastKey = 'a';
+                    break;
+                case 'w':
+                    if (player1.position.y + player1.height >= canvas.height) { // 只能在地面上跳
+                       player1.velocity.y = -20;
+                    }
+                    break;
+                case 's':
+                    player1.attack();
+                    break;
+
+                // 玩家2控制
+                case 'ArrowRight':
+                    keys.ArrowRight.pressed = true;
+                    player2.lastKey = 'ArrowRight';
+                    break;
+                case 'ArrowLeft':
+                    keys.ArrowLeft.pressed = true;
+                    player2.lastKey = 'ArrowLeft';
+                    break;
+                case 'ArrowUp':
+                    if (player2.position.y + player2.height >= canvas.height) { // 只能在地面上跳
+                        player2.velocity.y = -20;
+                    }
+                    break;
+                case 'ArrowDown':
+                    player2.attack();
+                    break;
+            }
+        });
+
+        window.addEventListener('keyup', (event) => {
+            switch (event.key) {
+                case 'd':
+                    keys.d.pressed = false;
+                    break;
+                case 'a':
+                    keys.a.pressed = false;
+                    break;
+                
+                case 'ArrowRight':
+                    keys.ArrowRight.pressed = false;
+                    break;
+                case 'ArrowLeft':
+                    keys.ArrowLeft.pressed = false;
+                    break;
+            }
+        });
+
+    </script>
+</body>
+</html>
